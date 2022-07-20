@@ -12,7 +12,7 @@ use solana_program::{
     pubkey::Pubkey,
     rent::Rent,
     system_instruction, system_program,
-    sysvar::Sysvar,
+    sysvar::Sysvar, msg,
 };
 use spl_associated_token_account::{get_associated_token_address, *};
 use spl_token::instruction::AuthorityType;
@@ -22,6 +22,8 @@ pub fn process_intruction(
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
+
+    msg!("Hello World");
     match InstructionEnum::decode(data) {
         InstructionEnum::MintNft(class) => mint_nft(program_id, accounts, class)?,
         InstructionEnum::MintNewCollection => mint_collection(program_id, accounts)?,
@@ -35,13 +37,13 @@ pub fn mint_nft(program_id: &Pubkey, accounts: &[AccountInfo], class: Class) -> 
     let account_info_iter = &mut accounts.iter();
     let payer_account_info = next_account_info(account_info_iter)?;
     let mint_account_info = next_account_info(account_info_iter)?;
-    let minting_pool_account_info = next_account_info(account_info_iter)?;
     let mint_authority_account_info = next_account_info(account_info_iter)?;
     let associated_token_account_info = next_account_info(account_info_iter)?;
     let spl_token_program_account_info = next_account_info(account_info_iter)?;
     let sysvar_rent_accoount_info = next_account_info(account_info_iter)?;
     let system_program_account_info = next_account_info(account_info_iter)?;
     let meta_data_account_info = next_account_info(account_info_iter)?;
+    let minting_pool_account_info = next_account_info(account_info_iter)?;
 
     let space = 82;
     let rent_lamports = Rent::get()?.minimum_balance(space);
@@ -73,10 +75,11 @@ pub fn mint_nft(program_id: &Pubkey, accounts: &[AccountInfo], class: Class) -> 
     if spl_token::id() != *spl_token_program_account_info.key {
         Err(ProgramError::Custom(4))?
     }
-
+    
+    let mpl_token_metadata_id = mpl_token_metadata::id();
     let metadata_seeds = &[
         PREFIX.as_bytes(),
-        program_id.as_ref(),
+        mpl_token_metadata_id.as_ref(),
         mint_account_info.key.as_ref(),
     ];
 
@@ -162,22 +165,6 @@ pub fn mint_nft(program_id: &Pubkey, accounts: &[AccountInfo], class: Class) -> 
         &[&[b"mint_authority", &[mint_authority_bump]]],
     )?;
 
-    invoke_signed(
-        &spl_token::instruction::set_authority(
-            spl_token_program_account_info.key,
-            mint_account_info.key,
-            None,
-            AuthorityType::MintTokens,
-            &mint_authority_key,
-            &[],
-        )?,
-        &[
-            mint_account_info.clone(),
-            mint_authority_account_info.clone(),
-        ],
-        &[&[b"mint_authority", &[mint_authority_bump]]],
-    )?;
-
     let mut creators = Vec::new();
     creators.push(Creator {
         address: mint_authority_key,
@@ -190,7 +177,7 @@ pub fn mint_nft(program_id: &Pubkey, accounts: &[AccountInfo], class: Class) -> 
 
     invoke(
         &mpl_token_metadata::instruction::create_metadata_accounts_v3(
-            mpl_token_metadata::id(),
+            mpl_token_metadata_id,
             nft_metadata_key,
             *mint_account_info.key,
             *mint_authority_account_info.key,
@@ -221,6 +208,22 @@ pub fn mint_nft(program_id: &Pubkey, accounts: &[AccountInfo], class: Class) -> 
         ],
     )?;
 
+    invoke_signed(
+        &spl_token::instruction::set_authority(
+            spl_token_program_account_info.key,
+            mint_account_info.key,
+            None,
+            AuthorityType::MintTokens,
+            &mint_authority_key,
+            &[],
+        )?,
+        &[
+            mint_account_info.clone(),
+            mint_authority_account_info.clone(),
+        ],
+        &[&[b"mint_authority", &[mint_authority_bump]]],
+    )?;
+
     invoke(
         &mpl_token_metadata::instruction::update_primary_sale_happened_via_token(
             mpl_token_metadata::id(),
@@ -242,7 +245,6 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
     let account_info_iter = &mut accounts.iter();
     let payer_account_info = next_account_info(account_info_iter)?;
     let mint_account_info = next_account_info(account_info_iter)?;
-    let minting_pool_account_info = next_account_info(account_info_iter)?;
     let mint_authority_account_info = next_account_info(account_info_iter)?;
     let associated_token_account_info = next_account_info(account_info_iter)?;
     let spl_token_program_account_info = next_account_info(account_info_iter)?;
@@ -250,23 +252,18 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
     let system_program_account_info = next_account_info(account_info_iter)?;
     let meta_data_account_info = next_account_info(account_info_iter)?;
 
-    let (minting_pool_key, _minting_pool_bump) =
-        Pubkey::find_program_address(&[b"minting_pool"], program_id);
-
-    if minting_pool_key != *minting_pool_account_info.key {
-        Err(ProgramError::Custom(0))?
-    }
-
     let (ingl_nft_collection_key, _ingl_nft_bump) =
-        Pubkey::find_program_address(&[b"ingl_nft_collection"], program_id);
+        Pubkey::find_program_address(&[b"ingl_nft_collection1"], program_id);
 
     if ingl_nft_collection_key != *mint_account_info.key {
+        msg!("Mint account info don't match");
         Err(ProgramError::Custom(0))?
     }
 
     let space = 82;
     let rent_lamports = Rent::get()?.minimum_balance(space);
 
+    msg!("Create mint account");
     invoke_signed(
         &system_instruction::create_account(
             payer_account_info.key,
@@ -276,7 +273,7 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
             spl_token_program_account_info.key,
         ),
         &[payer_account_info.clone(), mint_account_info.clone()],
-        &[&[b"ingl_nft_collection", &[_ingl_nft_bump]]],
+        &[&[b"ingl_nft_collection1", &[_ingl_nft_bump]]],
     )?;
 
     let (mint_authority_key, _mint_authority_bump) =
@@ -285,6 +282,8 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
     if mint_authority_key != *mint_authority_account_info.key {
         Err(ProgramError::Custom(1))?
     }
+
+    msg!("Initialize mint account");
     invoke(
         &spl_token::instruction::initialize_mint(
             &spl_token::id(),
@@ -296,6 +295,7 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
         &[mint_account_info.clone(), sysvar_rent_accoount_info.clone()],
     )?;
 
+    msg!("Create associated token account");
     invoke(
         &spl_associated_token_account::instruction::create_associated_token_account(
             payer_account_info.key,
@@ -319,6 +319,7 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
         Err(ProgramError::Custom(1))?
     }
 
+    msg!("Mint new collection token");
     invoke_signed(
         &spl_token::instruction::mint_to(
             spl_token_program_account_info.key,
@@ -336,45 +337,31 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
         &[&[b"mint_authority", &[mint_authority_bump]]],
     )?;
 
-    invoke_signed(
-        &spl_token::instruction::set_authority(
-            spl_token_program_account_info.key,
-            mint_account_info.key,
-            None,
-            AuthorityType::MintTokens,
-            &mint_authority_key,
-            &[],
-        )?,
-        &[
-            mint_account_info.clone(),
-            mint_authority_account_info.clone(),
-        ],
-        &[&[b"mint_authority", &[mint_authority_bump]]],
-    )?;
-
     let mut creators = Vec::new();
     creators.push(Creator {
         address: mint_authority_key,
         verified: true,
-        share: 0,
+        share: 100,
     });
 
+    let mpl_token_metadata_id = mpl_token_metadata::id();
     let metadata_seeds = &[
         PREFIX.as_bytes(),
-        program_id.as_ref(),
+        mpl_token_metadata_id.as_ref(),
         mint_account_info.key.as_ref(),
     ];
 
     let (nft_metadata_key, _nft_metadata_bump) =
-        Pubkey::find_program_address(metadata_seeds, program_id);
+        Pubkey::find_program_address(metadata_seeds, &mpl_token_metadata_id);
 
     if nft_metadata_key != *meta_data_account_info.key {
         Err(ProgramError::Custom(4))?
     }
 
-    invoke(
+    msg!("Create metaplex nft account v3");
+    invoke_signed(
         &mpl_token_metadata::instruction::create_metadata_accounts_v3(
-            mpl_token_metadata::id(),
+            mpl_token_metadata_id,
             nft_metadata_key,
             *mint_account_info.key,
             *mint_authority_account_info.key,
@@ -382,7 +369,7 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
             *mint_authority_account_info.key,
             String::from("Ingl Collection"),
             String::from("INGL#COL"),
-            String::from("https://arweave.net/WimminaDHDBBxHby2dzbXTMomy2UYuLDf4ymCCQLtP4"),
+            String::from("https://cdn.discordapp.com/attachments/952653904376659968/999014566505750692/0001-0300.mp4??ext=mp4"),
             Some(creators),
             300,
             true,
@@ -400,6 +387,25 @@ pub fn mint_collection(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
             system_program_account_info.clone(),
             sysvar_rent_accoount_info.clone(),
         ],
+        &[&[b"mint_authority", &[mint_authority_bump]]]
     )?;
+
+    msg!("Setting mint authority");
+    invoke_signed(
+        &spl_token::instruction::set_authority(
+            spl_token_program_account_info.key,
+            mint_account_info.key,
+            None,
+            AuthorityType::MintTokens,
+            &mint_authority_key,
+            &[],
+        )?,
+        &[
+            mint_account_info.clone(),
+            mint_authority_account_info.clone(),
+        ],
+        &[&[b"mint_authority", &[mint_authority_bump]]],
+    )?;
+    
     Ok(())
 }
